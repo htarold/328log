@@ -9,6 +9,14 @@ CFLAGS= -std=c99 -DF_CPU=16000000UL -O -g -Wall -mmcu=`[ -f MCU ] && cat MCU || 
 DUDEFLAGS=-v -v -F -p `[ -f PARTNO ] && cat PARTNO || cat $*.partno` -cusbasp -F
 #DUDEFLAGS=-v -v -F -p `[ -f PARTNO ] && cat PARTNO || cat $*.partno` -carduino -P /dev/ttyUSB0 -b 57600
 
+# Get numbers only
+# Apply conversion factor (converts lsb to millivolts)
+# Readings every 2 seconds.  Convert to amp-hours: /(30*60)
+%.txt:%.raw
+	sed '/^\[EOF/,$$d' <$< | \
+	awk 'BEGIN { sec = total = 0 }; { cur = $$1 * 0.0049 }; \
+	{ total = total + cur/(30*60) }; { print sec += 2, cur, total }' > $@
+
 wps-test.elf:wps-test.o timer.o
 	$(CC) $(CFLAGS) $^ -o $@
 	avr-size $@
@@ -40,6 +48,9 @@ wps-test.elf:wps-test.o timer.o
 %.partno: %.mcu
 	sed -e 's/atmega\([0123456789]*\)[a]/m\1/i' \
 	    -e 's/attiny\([0123456789]*\)[a]/t\1/i' <$< >$@
+
+%.eeprom.dump:
+	avrdude $(DUDEFLAGS) -U eeprom:r:$@:r
 
 %.bitclean:
 	rm -f $*.o $*.elf $*.hex core

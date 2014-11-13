@@ -99,13 +99,28 @@ void timer_init(void)
 {
   TIMSK1 = _BV(OCIE1A);
 #if 1
-  OCR1A = 15625;                      /* every 1 second */
+  OCR1A = 15625 * 2;                  /* every 2 seconds */
 #else
-  OCR1A = 1563;
+  OCR1A = 3125;                       /* debug at speed */
 #endif
   TCCR1A = 0;
   TCCR1B = _BV(WGM12)                 /* CTC mode 4 */
          | _BV(CS12) | _BV(CS10);     /* /1024 = 15625Hz */
+}
+
+uint16_t read_adc(uint8_t mux)
+{
+  uint16_t lsb;
+  PRR &= ~_BV(PRADC);
+  ADCSRB = 0;
+  ADCSRA = _BV(ADEN)
+         | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0);
+  ADMUX = mux;
+  ADCSRA |= _BV(ADSC);                /* start */
+  while( ADCSRA & _BV(ADSC) );
+  lsb = ADC;
+  ADCSRA &= ~_BV(ADEN);
+  return(lsb);
 }
 
 void download(void)
@@ -117,15 +132,15 @@ void download(void)
   do{
     empties = 0;
     for(i = 0; i < RECORD_SIZE; i++){
-      int16_t w;
-      w = pgm_read_word_near(addr);
+      uint16_t lsb;
+      lsb = pgm_read_word_near(addr);
       addr += 2;
-      putd(w);
+      putd(lsb);
       putch(' ');
-      if( 0xffff == w )empties++;
+      if( 0xffff == lsb )empties++;
     }
     putstr("\r\n");
-  }while( empties < RECORD_SIZE );
+  }while( empties < RECORD_SIZE && addr < BOOTSTART );
   putstr("[EOF]\r\n");
 }
 
@@ -141,26 +156,18 @@ void erase(void)
   ADC0-3 are available.
  */
 
-void capture_record(void)
+void read_record(void)
 {
   uint8_t i;
   uint16_t adc;
 
-  PRR &= ~_BV(PRADC);
-  ADCSRB = 0;
-  ADCSRA = _BV(ADEN)
-         | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0);
   for(i = 0; i < RECORD_SIZE; i++){
-    ADMUX = i | _BV(REFS0);
-    ADCSRA |= _BV(ADSC);              /* start */
-    while( ADCSRA & _BV(ADSC) );
-    adc = ADC;
+    adc = read_adc(i | _BV(REFS0) | _BV(REFS1));
     page_addword(adc);
     putstr("## Got value ");
     putd(adc);
     putstr("\r\n");
   }
-  ADCSRA &= ~_BV(ADEN);
 }
 
 int main(void)
@@ -170,7 +177,7 @@ int main(void)
 
   usart_init();
 
-  _delay_ms(4000);                    /* How we debounce */
+  _delay_ms(3000);                    /* How we debounce */
 
   putstr("Starting\r\n");
 
@@ -178,7 +185,6 @@ int main(void)
     uint16_t w;
     char ch;
     w = pgm_read_word_near(0);
-    putstr("## initial word = ");
     putd(w);
     putstr("\r\n");
     if( 0xffff == w )break;
@@ -194,16 +200,25 @@ int main(void)
   page_address = 0;
   page_offset = 0;
 
+  /*
+    Turn on LED (PB5) for a while
+   */
+
+  DDRB |= _BV(PB5);
+  PORTB |= _BV(PB5);
+  _delay_ms(4000);
+  PORTB &= ~_BV(PB5);
+  DDRB &= ~_BV(PB5);
+
   timer_init();
   sei();
 
   set_sleep_mode(SLEEP_MODE_IDLE);
-  putstr("## sleep mode set.\r\n");
 
   for( ; ; ){
     sleep_mode();
     if( ! timer_flag )continue;
     timer_flag = 0;
-    capture_record();
+    read_record();
   }
 }
