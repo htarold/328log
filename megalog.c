@@ -5,6 +5,7 @@
 #include <avr/sleep.h>
 #include <avr/boot.h>
 #include <avr/fuse.h>
+#include <avr/eeprom.h>
 #include <util/delay.h>
 
 #ifndef F_CPU
@@ -14,13 +15,20 @@
 #error BOOTSTART not defined
 #endif
 
-#define RECORD_SIZE 1                 /* ADC0, max 4 (ADC3) */
-
 FUSES = {                             /* All are arduino defaults */
   .low = 0xFF,
   .high = 0xDA,
   .extended = 0x5,
 };
+
+struct options {
+  uint16_t cal1v1;
+  uint8_t nrchans;
+  uint8_t vref;
+  uint8_t nrseconds;
+};
+struct options EEMEM ee;
+struct options opt;
 
 #define DBG_LED_ON \
 { DDRB |= _BV(PB5); PORTB |= _BV(PB5); }
@@ -45,7 +53,7 @@ void putd(uint16_t d)
   int8_t i;
   i = sizeof(buf)-1;
   buf[i--] = '\0';
-  do buf[i--] = "0123456789"[d%10]; while( (d /= 10) );
+  do buf[i--] = '0' + (d%10); while( (d /= 10) );
   putstr(buf + i + 1);
 }
 
@@ -99,7 +107,7 @@ void timer_init(void)
 {
   TIMSK1 = _BV(OCIE1A);
 #if 1
-  OCR1A = 15625 * 2;                  /* every 2 seconds */
+  OCR1A = 15625;                      /* every 1 second */
 #else
   OCR1A = 3125;                       /* debug at speed */
 #endif
@@ -107,6 +115,9 @@ void timer_init(void)
   TCCR1B = _BV(WGM12)                 /* CTC mode 4 */
          | _BV(CS12) | _BV(CS10);     /* /1024 = 15625Hz */
 }
+
+#define VREF_AVCC (_BV(REFS0))
+#define VREF_1V1  (_BV(REFS1) | _BV(REFS0))
 
 uint16_t read_adc(uint8_t mux)
 {
@@ -128,10 +139,36 @@ void download(void)
   uint8_t i, empties;
   uint32_t addr;
 
+  /*
+  uint32_t factor;
+    mV = (1000*lsb/1024) * vref
+    if vref is 5V, then
+    mV = 250*lsb/256
+    if vref is 1v1, then
+    vref = (opt.cal1v1/1024) * 5
+    mV = (1000*lsb * opt.cal1v1*5)/(1024*1024)
+    mV = (125*lsb * opt.cal1v1*5)/(128*1024)
+    mV = 0.61...(lsb*opt.cal1v1)/128
+    mV = (625*lsb*opt.cal1v1/1024)/128
+    mV = (625*lsb*opt.cal1v1/512)/256
+
+  if( opt.vref == VREF_1V1 )
+    factor = (opt.cal1v1 * 125 * 5)/512;
+  else
+    factor = 250;
+   */
+
+  putd(opt.nrseconds);
+  putstr("between records.\r\n");
+  if( VREF_AVCC == opt.vref )putstr("5V");
+  else if( VREF_1V1 == opt.vref )putstr("1.1V");
+  else putstr("[unknown]");
+  putstr("reference\r\n");
+
   addr = 0;
   do{
     empties = 0;
-    for(i = 0; i < RECORD_SIZE; i++){
+    for(i = 0; i < opt.nrchans; i++){
       uint16_t lsb;
       lsb = pgm_read_word_near(addr);
       addr += 2;
@@ -140,16 +177,18 @@ void download(void)
       if( 0xffff == lsb )empties++;
     }
     putstr("\r\n");
-  }while( empties < RECORD_SIZE && addr < BOOTSTART );
+  }while( empties < opt.nrchans && addr < BOOTSTART );
   putstr("[EOF]\r\n");
 }
 
+void options_read(void);
 void erase(void)
 {
   putstr("Really erase? ");
   if( 'y' != getc() )return;
   boot_page_erase_safe(0);
   putstr("Erased\r\n");
+  options_read();
 }
 
 /*
@@ -161,8 +200,8 @@ void read_record(void)
   uint8_t i;
   uint16_t adc;
 
-  for(i = 0; i < RECORD_SIZE; i++){
-    adc = read_adc(i | _BV(REFS0) | _BV(REFS1));
+  for(i = 0; i < opt.nrchans; i++){
+    adc = read_adc(i | VREF_1V1);
     page_addword(adc);
     putstr("## Got value ");
     putd(adc);
@@ -170,32 +209,69 @@ void read_record(void)
   }
 }
 
+inline void options_init(void)
+{
+  eeprom_read_block(&opt, &ee, sizeof(opt));
+}
+void options_read(void)
+{
+  for( ; ; ){
+    char ch;
+    putstr("[I]nternal 1.1V vref\r\n"
+           "[5]V vref\r\n"
+  	 "[1234] # of channels\r\n"
+  	 "[abc..] 1/2/3.. secs interval\r\n"
+  	 "[Q]uit\r\n");
+    ch = getc();
+    if( 'I' == ch )opt.vref = VREF_1V1;
+    else if( '5' == ch )opt.vref = VREF_AVCC;
+    else if( ch < '5' && ch > '0' )opt.nrchans = ch - '0';
+    else if( ch <= 'z' && ch >= 'a' )opt.nrseconds = 1 + (ch - 'a');
+    /*else if( ch == 'X' )opt.cal1v1 = read_adc(0xe | VREF_AVCC);*/
+    else if( 'Q' == ch )break;
+  }
+  eeprom_write_block(&opt, &ee, sizeof(opt));
+}
+inline int8_t options_ok(void)
+{
+  /* if( opt.cal1v1 < 300 ) */
+  if( opt.nrchans < 5 )
+  if( opt.vref == VREF_1V1 || opt.vref == VREF_AVCC )
+    return(1);
+  return(0);
+}
+
+inline int8_t have_data(void)
+{
+  return(pgm_read_word_near(0) != 0xffff);
+}
+
 int main(void)
 {
+  uint8_t seconds;
   MCUCR = _BV(IVCE);
   MCUCR = _BV(IVSEL);
 
   usart_init();
 
-  _delay_ms(3000);                    /* How we debounce */
+  options_init();
 
-  putstr("Starting\r\n");
+  _delay_ms(2000);                    /* How we debounce */
 
-  for( ; ; ){
-    uint16_t w;
+  putstr("Start\r\n");
+
+  while( have_data() ){
     char ch;
-    w = pgm_read_word_near(0);
-    putd(w);
-    putstr("\r\n");
-    if( 0xffff == w )break;
     putstr("[D]ownload/[e]rase? ");
     ch = getc();
     if( 'D' == ch )download();
     else if( 'e' == ch )erase();
   }
 
+  while( ! options_ok() )options_read();
+
   putstr("Logging ");
-  putd(RECORD_SIZE);
+  putd(opt.nrchans);
   putstr(" field[s] per record\r\n");
   page_address = 0;
   page_offset = 0;
@@ -215,10 +291,14 @@ int main(void)
 
   set_sleep_mode(SLEEP_MODE_IDLE);
 
+  seconds = 0;
   for( ; ; ){
-    sleep_mode();
-    if( ! timer_flag )continue;
+    while( ! timer_flag )
+      sleep_mode();
     timer_flag = 0;
+    seconds++;
+    if( seconds < opt.nrseconds )continue;
+    seconds = 0;
     read_record();
   }
 }
