@@ -15,6 +15,8 @@
 #error BOOTSTART not defined
 #endif
 
+#define INLINE /* nothing */
+
 FUSES = {                             /* All are arduino defaults */
   .low = 0xFF,
   .high = 0xDA,
@@ -45,9 +47,25 @@ struct options opt;
 #define DBG_LED_ON \
 { DDRB |= _BV(DDB5); PORTB |= _BV(PORTB5); }
 
+volatile uint8_t timer_flag; ISR(TIMER1_COMPA_vect) { timer_flag = 1; }
+
+static void timer_init(void)
+{
+  TIMSK1 = _BV(OCIE1A);
+#if 1
+  OCR1A = 15625;                      /* every 1 second */
+#else
+  OCR1A = 3125;                       /* debug at speed */
+#endif
+  TCCR1A = 0;
+  TCCR1B = _BV(WGM12)                 /* CTC mode 4 */
+         | _BV(CS12) | _BV(CS10);     /* /1024 = 15625Hz */
+}
+
 int8_t getc(void)
 {
-  while( ! (UCSR0A & _BV(RXC0)) );
+  while( ! (UCSR0A & _BV(RXC0)) )
+    if( timer_flag )return(timer_flag = 0);
   return(UDR0);
 }
 void putch(char ch)
@@ -69,6 +87,16 @@ void putd(uint16_t d)
   putstr(buf + i + 1);
 }
 
+void puteestr(char * s)  /* XXX May be very slow */
+{
+  uint8_t i;
+  char ch;
+  for(i = 0; (ch = eeprom_read_byte((uint8_t *)s+i)); i++)
+    putch(ch);
+}
+#define PUTEESTR(lit) { static char str[] EEMEM = lit; puteestr(str); }
+static inline void putnl(void) { PUTEESTR("\r\n"); }
+
 void usart_init(void)
 {
   UBRR0H = 0;
@@ -88,7 +116,7 @@ void page_sync(void)
   if( page_address >= BOOTSTART ){
     for( ; ; ){
       sleep_mode();
-      putstr("Out of memory\r\n");
+      PUTEESTR("Out of memory\r\n");
     }
   }
   boot_page_write_safe((uint32_t)page_address);
@@ -96,10 +124,10 @@ void page_sync(void)
   boot_rww_enable_safe();
   page_address += SPM_PAGESIZE;
   page_offset = 0;
-  putstr("Synced\r\n");
+  PUTEESTR("Synced\r\n");
 }
 
-void page_addbyte(uint8_t b)
+static void page_addbyte(uint8_t b)
 {
   if( 0 == page_offset && page_address < BOOTSTART )
     boot_page_erase_safe(page_address);
@@ -109,7 +137,7 @@ void page_addbyte(uint8_t b)
     page_sync();
 }
 
-void page_add(uint16_t w)
+static void page_add(uint16_t w)
 {
   static uint8_t ndx;
   if( 0 == ndx )
@@ -129,29 +157,11 @@ void page_add(uint16_t w)
   }
 }
 
-volatile uint8_t timer_flag;
-ISR(TIMER1_COMPA_vect)
-{
-  timer_flag = 1;
-}
-
-void timer_init(void)
-{
-  TIMSK1 = _BV(OCIE1A);
-#if 1
-  OCR1A = 15625;                      /* every 1 second */
-#else
-  OCR1A = 3125;                       /* debug at speed */
-#endif
-  TCCR1A = 0;
-  TCCR1B = _BV(WGM12)                 /* CTC mode 4 */
-         | _BV(CS12) | _BV(CS10);     /* /1024 = 15625Hz */
-}
 
 #define VREF_AVCC (_BV(REFS0))
 #define VREF_1V1  (_BV(REFS1) | _BV(REFS0))
 
-uint16_t read_adc(uint8_t mux)
+static INLINE uint16_t read_adc(uint8_t mux)
 {
   uint16_t lsb;
   PRR &= ~_BV(PRADC);
@@ -166,39 +176,30 @@ uint16_t read_adc(uint8_t mux)
   return(lsb);
 }
 
-void inline download(void)
+static void putspace(void) { PUTEESTR(" "); }
+static void INLINE download(void)
 {
-  uint8_t i, empties;
+  uint8_t i, empties, field;
   uint32_t addr;
 
-  /*
-  uint32_t factor;
-    mV = (1000*lsb/1024) * vref
-    if vref is 5V, then
-    mV = 250*lsb/256
-    if vref is 1v1, then
-    vref = (opt.cal1v1/1024) * 5
-    mV = (1000*lsb * opt.cal1v1*5)/(1024*1024)
-    mV = (125*lsb * opt.cal1v1*5)/(128*1024)
-    mV = 0.61...(lsb*opt.cal1v1)/128
-    mV = (625*lsb*opt.cal1v1/1024)/128
-    mV = (625*lsb*opt.cal1v1/512)/256
-
-  if( opt.vref == VREF_1V1 )
-    factor = (opt.cal1v1 * 125 * 5)/512;
-  else
-    factor = 250;
-   */
-
   putd(opt.nrseconds);
-  putstr("between records.\r\n");
-  if( VREF_AVCC == opt.vref )putstr("5V");
-  else if( VREF_1V1 == opt.vref )putstr("1.1V");
-  else putstr("[unknown]");
-  putstr("reference\r\n");
+  PUTEESTR(" between records.\r\n ");
+  if( VREF_AVCC == opt.vref ){ PUTEESTR("5V");
+  }else if( VREF_1V1 == opt.vref ){ PUTEESTR("1.1V");
+  }else PUTEESTR("[unknown]");
+  PUTEESTR(" reference\r\n");
 
-  addr = 0;
+  for(addr = 0; addr < SPM_PAGESIZE; addr++){
+    char ch;
+    ch = pgm_read_byte_near(addr);
+    if( ! ch )break;
+    putch(ch);
+  }
+  putnl();
+
+  addr = SPM_PAGESIZE;
   empties = 0;
+  field = 0;
 
   for( ; ; ){
     for(i = 0; i < 5; i++, addr++){
@@ -208,30 +209,37 @@ void inline download(void)
         if( ++empties > 1 )goto out;
     }
     if( empties > 1 )break;
-    putd(u.words.w0); putstr("\r\n");
-    putd(u.words.w1); putstr("\r\n");
-    putd(u.words.w2); putstr("\r\n");
-    putd(u.words.w3); putstr("\r\n");
+    putd(u.words.w0);
+    if( field++ >= opt.nrchans ){ field = 0; putnl(); }
+    else putspace();
+    putd(u.words.w1);
+    if( field++ >= opt.nrchans ){ field = 0; putnl(); }
+    else putspace();
+    putd(u.words.w2);
+    if( field++ >= opt.nrchans ){ field = 0; putnl(); }
+    else putspace();
+    putd(u.words.w3);
+    if( field++ >= opt.nrchans ){ field = 0; putnl(); }
+    else putspace();
   }
 out:
-  putstr("[EOF]\r\n");
+  PUTEESTR("\r\n[EOF]\r\n");
 }
 
-void options_read(void);
-void inline erase(void)
+static void options_read(void);
+static INLINE void erase(void)
 {
-  putstr("Really erase? ");
+  PUTEESTR("Really erase? ");
   if( 'y' != getc() )return;
   boot_page_erase_safe(0);
-  putstr("Erased\r\n");
-  options_read();
+  PUTEESTR("Erased\r\n");
 }
 
 /*
   ADC0-3 are available.
  */
 
-void read_record(void)
+static INLINE void read_record(void)
 {
   uint8_t i;
   uint16_t adc;
@@ -241,19 +249,20 @@ void read_record(void)
     page_add(adc);
     putstr("## Got value ");
     putd(adc);
-    putstr("\r\n");
+    putnl();
   }
 }
 
-static inline void options_init(void)
+static INLINE void options_init(void)
 {
   eeprom_read_block(&opt, &ee, sizeof(opt));
 }
-void options_read(void)
+
+static INLINE void options_read(void)
 {
   for( ; ; ){
     char ch;
-    putstr("[I]nternal 1.1V vref\r\n"
+    PUTEESTR("[I]nternal 1.1V vref\r\n"
            "[5]V vref\r\n"
   	 "[1234] # of channels\r\n"
   	 "[abc..] 1/2/3.. secs interval\r\n"
@@ -268,7 +277,8 @@ void options_read(void)
   }
   eeprom_write_block(&opt, &ee, sizeof(opt));
 }
-inline int8_t options_ok(void)
+
+static INLINE int8_t options_ok(void)
 {
   /* if( opt.cal1v1 < 300 ) */
   if( opt.nrchans < 5 )
@@ -277,9 +287,9 @@ inline int8_t options_ok(void)
   return(0);
 }
 
-inline int8_t have_data(void)
+static INLINE int8_t have_data(void)
 {
-  return(pgm_read_word_near(0) != 0xffff);
+  return(pgm_read_word_near(SPM_PAGESIZE) != 0xffff);
 }
 
 int main(void)
@@ -294,22 +304,36 @@ int main(void)
 
   _delay_ms(2000);                    /* How we debounce */
 
-  putstr("Start\r\n");
+  PUTEESTR("Start\r\n");
 
   while( have_data() ){
     char ch;
-    putstr("[D]ownload/[e]rase? ");
+    PUTEESTR("[D]ownload/[e]rase? ");
     ch = getc();
     if( 'D' == ch )download();
     else if( 'e' == ch )erase();
   }
 
-  while( ! options_ok() )options_read();
+  timer_init();
+  sei();
 
-  putstr("Logging ");
+  if( options_ok() ){
+    /* before beginning to log, give usera chance to use menu */
+    if( getc() )goto menu;  /* times out in 1 second */
+    if( getc() )goto menu;
+    if( getc() )goto menu;
+    if( getc() )goto menu;
+  }else{
+menu:
+    for( ; ; )
+      options_read();
+  }
+
+#if 0
+  PUTEESTR("Logging ");
   putd(opt.nrchans);
-  putstr(" field[s] per record\r\n");
-  page_address = 0;
+  PUTEESTR(" field[s] per record\r\n");
+  page_address = SPM_PAGESIZE;
   page_offset = 0;
 
   /*
@@ -321,9 +345,7 @@ int main(void)
   _delay_ms(4000);
   PORTB &= ~_BV(PORTB5);
   DDRB &= ~_BV(DDB5);
-
-  timer_init();
-  sei();
+#endif
 
   set_sleep_mode(SLEEP_MODE_IDLE);
 
