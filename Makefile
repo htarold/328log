@@ -1,13 +1,25 @@
 # For programming into bootloader section:
 # Using the same fuses/bootloader sizes as in arduino promini 5V/16MHz
+MCU=atmega328p
+PARTNO=m328p
 BOOTSTART=0x7800
-# For compiling:
-CC = avr-gcc
-OBJCOPY = avr-objcopy
-#CFLAGS= -DCOMPILED="\"`date +'Build %H:%M:%S %d/%m/%Y'`\"" -std=c99 -O -g -Wall
-CFLAGS= -std=c99 -DF_CPU=16000000UL -O -g -Wall -mmcu=`[ -f MCU ] && cat MCU || cat $*.mcu` -DBOOTSTART=$(BOOTSTART) -Wl,--section-start=.text=$(BOOTSTART)
-DUDEFLAGS=-v -v -F -p `[ -f PARTNO ] && cat PARTNO || cat $*.partno` -cusbasp -F
-#DUDEFLAGS=-v -v -F -p `[ -f PARTNO ] && cat PARTNO || cat $*.partno` -carduino -P /dev/ttyUSB0 -b 57600
+
+# Where the tools are.  Assume an arduino IDE is installed
+DIR_ARDUINO=~/arduino-1.0.5
+#DIR_ARDUINO=~/arduino-1.5.7
+DIR_TOOLS=$(DIR_ARDUINO)/hardware/tools
+DIR_BIN=$(DIR_TOOLS)/avr/bin
+DIR_ETC=$(DIR_TOOLS)/avr/etc
+DIR_INC=$(DIR_TOOLS)/avr/lib/avr/include
+AVRDUDE=$(lastword $(shell ls $(DIR_BIN)/avrdude $(DIR_TOOLS)/avrdude))
+DUDECONF=$(lastword $(shell ls $(DIR_ETC)/avrdude.conf $(DIR_TOOLS)/avrdude.conf))
+CC=$(DIR_BIN)/avr-gcc
+OBJCOPY=$(DIR_BIN)/avr-objcopy
+SIZE=$(DIR_BIN)/avr-size
+
+#LIBS=-L$(DIR_TOOLS)/../lib -L$(DIR_TOOLS)/../lib/avr/lib
+CFLAGS= -std=c99 -DF_CPU=16000000UL -O -g -Wall -mmcu=$(MCU) -DBOOTSTART=$(BOOTSTART) -Wl,--section-start=.text=$(BOOTSTART) $(LIBS) -I$(DIR_INC)
+DUDEFLAGS=-v -v -F -p $(PARTNO) -cusbasp -F
 
 # Get numbers only
 # Apply conversion factor (converts lsb to millivolts)
@@ -17,16 +29,13 @@ DUDEFLAGS=-v -v -F -p `[ -f PARTNO ] && cat PARTNO || cat $*.partno` -cusbasp -F
 	awk 'BEGIN { sec = total = 0 }; { cur = $$1 * 0.0049 }; \
 	{ total = total + cur/(30*60) }; { print sec += 2, cur, total }' > $@
 
-wps-test.elf:wps-test.o timer.o
-	$(CC) $(CFLAGS) $^ -o $@
-	avr-size $@
 %.list: %.c
 	$(CC) -c $(CFLAGS) -E $< |less
 %.o:%.c
 	$(CC) -c $(CFLAGS) $*.c -o $@
 %.elf:%.o
 	$(CC) $(CFLAGS) $*.o -o $@
-	avr-size $@
+	$(SIZE) $@
 %.hex: %.elf
 	$(OBJCOPY) -j .text -j .data -O ihex $< $@
 %.bin: %.hex

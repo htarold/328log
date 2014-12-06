@@ -21,8 +21,20 @@ FUSES = {                             /* All are arduino defaults */
   .extended = 0x5,
 };
 
+union {
+  struct {
+    uint8_t b[5];
+  }bytes;
+  struct {
+    unsigned w0:10;
+    unsigned w1:10;
+    unsigned w2:10;
+    unsigned w3:10;
+  }words;
+}u;
+
 struct options {
-  uint16_t cal1v1;
+  uint16_t cal1v1;  /* ever going to use this? */
   uint8_t nrchans;
   uint8_t vref;
   uint8_t nrseconds;
@@ -31,7 +43,7 @@ struct options EEMEM ee;
 struct options opt;
 
 #define DBG_LED_ON \
-{ DDRB |= _BV(PB5); PORTB |= _BV(PB5); }
+{ DDRB |= _BV(DDB5); PORTB |= _BV(PORTB5); }
 
 int8_t getc(void)
 {
@@ -87,14 +99,34 @@ void page_sync(void)
   putstr("Synced\r\n");
 }
 
-void page_addword(int16_t w)
+void page_addbyte(uint8_t b)
 {
   if( 0 == page_offset && page_address < BOOTSTART )
     boot_page_erase_safe(page_address);
-  boot_page_fill_safe((uint32_t)page_address + page_offset, w);
-  page_offset += 2;
+  boot_page_fill_safe((uint32_t)page_address + page_offset, b);
+  page_offset++;
   if( page_offset >= SPM_PAGESIZE )
     page_sync();
+}
+
+void page_add(uint16_t w)
+{
+  static uint8_t ndx;
+  if( 0 == ndx )
+    u.words.w0 = w;
+  else if( 1 == ndx )
+    u.words.w1 = w;
+  else if( 2 == ndx )
+    u.words.w2 = w;
+  else if( 3 == ndx )
+    u.words.w3 = w;
+  ndx++;
+  if( 4 == ndx ){
+    uint8_t i;
+    ndx = 0;
+    for(i = 0; i < 5; i++)
+      page_addbyte(u.bytes.b[i]);
+  }
 }
 
 volatile uint8_t timer_flag;
@@ -134,7 +166,7 @@ uint16_t read_adc(uint8_t mux)
   return(lsb);
 }
 
-void download(void)
+void inline download(void)
 {
   uint8_t i, empties;
   uint32_t addr;
@@ -166,23 +198,27 @@ void download(void)
   putstr("reference\r\n");
 
   addr = 0;
-  do{
-    empties = 0;
-    for(i = 0; i < opt.nrchans; i++){
-      uint16_t lsb;
-      lsb = pgm_read_word_near(addr);
-      addr += 2;
-      putd(lsb);
-      putch(' ');
-      if( 0xffff == lsb )empties++;
+  empties = 0;
+
+  for( ; ; ){
+    for(i = 0; i < 5; i++, addr++){
+      if( addr >= BOOTSTART )goto out;
+      u.bytes.b[i] = pgm_read_byte_near(addr);
+      if( (addr % SPM_PAGESIZE) < 4 && u.bytes.b[i] == 0xff )
+        if( ++empties > 1 )goto out;
     }
-    putstr("\r\n");
-  }while( empties < opt.nrchans && addr < BOOTSTART );
+    if( empties > 1 )break;
+    putd(u.words.w0); putstr("\r\n");
+    putd(u.words.w1); putstr("\r\n");
+    putd(u.words.w2); putstr("\r\n");
+    putd(u.words.w3); putstr("\r\n");
+  }
+out:
   putstr("[EOF]\r\n");
 }
 
 void options_read(void);
-void erase(void)
+void inline erase(void)
 {
   putstr("Really erase? ");
   if( 'y' != getc() )return;
@@ -202,14 +238,14 @@ void read_record(void)
 
   for(i = 0; i < opt.nrchans; i++){
     adc = read_adc(i | VREF_1V1);
-    page_addword(adc);
+    page_add(adc);
     putstr("## Got value ");
     putd(adc);
     putstr("\r\n");
   }
 }
 
-inline void options_init(void)
+static inline void options_init(void)
 {
   eeprom_read_block(&opt, &ee, sizeof(opt));
 }
@@ -280,11 +316,11 @@ int main(void)
     Turn on LED (PB5) for a while
    */
 
-  DDRB |= _BV(PB5);
-  PORTB |= _BV(PB5);
+  DDRB |= _BV(DDB5);
+  PORTB |= _BV(PORTB5);
   _delay_ms(4000);
-  PORTB &= ~_BV(PB5);
-  DDRB &= ~_BV(PB5);
+  PORTB &= ~_BV(PORTB5);
+  DDRB &= ~_BV(DDB5);
 
   timer_init();
   sei();

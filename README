@@ -1,0 +1,75 @@
+What
+====
+328log turns a cheap Arduino Pro Mini stamp board into a standalone low
+rate data logger, sampling from the ADC and writing to the device's
+own flash.  No external SD card is used.  The 30kB of available
+flash is enough for about 24,000 data points.  At a typical
+sample interval of 4 seconds, the device will store over a day's
+worth of data.
+
+Why
+===
+Instead of simulating or guessing at, say, how much power a new
+project consumes, I find it's better to just log that parameter over
+the course of normal usage.  Often I will have some Arduino Pro Mini
+boards on hand, because they can be had for as little as $3 a piece.
+328log makes it trivial to collect the data.
+
+328log obviates the need for an SD card, which `will cost
+more than the board, and which will need level shifting.
+Sometimes you just don't need that kind of capacity and you
+don't want the extra complexity.
+
+How
+===
+328log is NOT an Arduino "sketch"; it replaces the Arduino
+bootloader that ships with the board.  To do this, you must use
+an in-circuit serial programmer (ISP), such as USBASP, or
+ArduinoISP.  If you have an Arduino IDE installed, you will
+already have all the software tools you need to programme the
+board with 328log.
+
+To flash the programme image:
+
+How to use
+==========
+The device will begin logging immediately if it can do so safely
+and if not interrupted (by keyboard).  Otherwise it will present
+the menu for your attention, which will be the case initially.
+
+Connect up the serial connection (typically you would use a
+USB-TTL serial converter) and set parameters to 19200, 8N1.
+The board will respond with a menu.  You can perform the
+following:
+- Select internal 1.1V voltage reference or Vcc;
+- Select number of channels (up to 4);
+- Select sample interval (0.5s to 10s)
+- Enter a note
+- Download data
+- Erase flash
+
+If 1 channel is selected, then it is ADC0 (pin A0 on the board);
+if 2 channels, then the second is ADC1 (A1); etc.
+
+Choosing the 1.1V reference is useful if you need slightly
+better resolution, or if you are powering the board from an
+external, noisy, 5V supply such as USB.
+
+You should enable screen logging before choosing Download, which
+copies the logged data to the terminal.
+
+Erase erases the logged data and the accompanying note.
+
+The note can contain the date, time, location, purpose, setup,
+your name, etc. of the data to be logged.  Max 127 characters long.
+
+Power off the board after configuration.  The device will begin
+logging when next powered up or reset.  You can detach the serial
+connection (typically) or leave it attached to view the logging
+process.
+
+The device buffers the data collected before it is written to
+flash, so when you power it off, you may lose up to one full buffer's
+worth of data (about a hundred data points).  This is rarely an issue,
+and you can avoid it by always letting it log to full flash
+capacity.
