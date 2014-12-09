@@ -15,8 +15,6 @@
 #error BOOTSTART not defined
 #endif
 
-#define INLINE /* nothing */
-
 FUSES = {                             /* All are arduino defaults */
   .low = 0xFF,
   .high = 0xDA,
@@ -87,7 +85,7 @@ static void puteestr(char * s, uint8_t len)  /* XXX May be very slow */
 }
 #define PUTEESTR(lit) \
 { static char str[] EEMEM = lit; puteestr(str, sizeof(str)-1); }
-static inline void putnl(void) { PUTEESTR("\r\n"); }
+static void putnl(void) { PUTEESTR("\r\n"); }
 
 static inline void usart_init(void)
 {
@@ -105,12 +103,6 @@ uint8_t page_offset;
 
 static inline void page_sync(void)
 {
-  if( page_address >= BOOTSTART ){
-    for( ; ; ){
-      sleep_mode();
-      PUTEESTR("Out of memory\r\n");
-    }
-  }
   boot_page_write_safe((uint32_t)page_address);
   boot_spm_busy_wait();
   boot_rww_enable_safe();
@@ -121,7 +113,12 @@ static inline void page_sync(void)
 
 static void page_addword(uint8_t w)
 {
-  if( 0 == page_offset && page_address < BOOTSTART )
+  if( page_address >= BOOTSTART )
+    for( ; ; ){
+      sleep_mode();
+      PUTEESTR("Out of memory\r\n");
+    }
+  if( 0 == page_offset )
     boot_page_erase_safe(page_address);
   boot_page_fill_safe((uint32_t)page_address + page_offset, w);
   page_offset += 2;
@@ -144,7 +141,7 @@ static void page_add(uint16_t w)
 #define VREF_AVCC (_BV(REFS0))
 #define VREF_1V1  (_BV(REFS1) | _BV(REFS0))
 
-static INLINE uint16_t read_adc(uint8_t mux)
+static inline uint16_t read_adc(uint8_t mux)
 {
   uint16_t lsb;
 #if 0
@@ -161,35 +158,36 @@ static INLINE uint16_t read_adc(uint8_t mux)
   return(lsb);
 }
 
-static void putspace(void) { PUTEESTR(" "); }
-static void INLINE download(void)
+static void inline download(void)
 {
-  uint8_t i, empties, field;
-  uint32_t addr;
+  uint8_t i, field;
+  uint16_t addr;
 
-  puteestr(ee_config, sizeof(ee_config)-1);
+  putch('!');
+  puteestr(ee_config, sizeof(ee_config));
+  putch('?');
   putnl();
 
-  addr = SPM_PAGESIZE;
-  empties = 0;
+  addr = 0;
   field = 0;
 
   while( addr < BOOTSTART ){
     uint32_t buffer;
-    buffer = pgm_read_word_near(addr += 2);
-    buffer <<= 16;
-    buffer |= pgm_read_word_near(addr += 2);
+    buffer = pgm_read_dword_near(addr);
+    if( 0xffffffff == buffer )break;
+    addr += 4;
     for(i = 0; i < 3; i++){
-      putd((buffer & (0x3f<<20))>>20);
+      putd((buffer & 0x3ff00000)>>20);
       buffer <<= 10;
-      if( ++field == opt.nrchans ){ field = 0; putnl(); }
-      else putspace();
+      field++;
+      if( field >= opt.nrchans ){ field = 0; putnl(); }
+      else PUTEESTR(" ");
     }
   }
   PUTEESTR("\r\n[EOF]\r\n");
 }
 
-static INLINE void erase(void)
+static inline void erase(void)
 {
   PUTEESTR("Really erase? ");
   if( 'y' != getc() )return;
@@ -201,7 +199,7 @@ static INLINE void erase(void)
   ADC0-3 are available.
  */
 
-static INLINE void read_record(void)
+static inline void read_record(void)
 {
   uint8_t i;
   uint16_t adc;
@@ -220,8 +218,11 @@ static int8_t options_parse(void)
 {
   char config[sizeof(ee_config)];
   char * s;
+  uint8_t i;
 
-  eeprom_read_block(config, ee_config, sizeof(ee_config));
+  for(i = 0; i < sizeof(ee_config); i++)
+    config[i] = eeprom_read_byte(ee_config + i);
+
   s = config;
 
   /* parse vref */
@@ -246,7 +247,7 @@ static int8_t options_parse(void)
   if( *s != 'L' )return(-1);
   return(0);
 }
-static INLINE void options_read(void)
+static inline void options_read(void)
 {
   char s[sizeof(ee_config)];
   uint8_t i;
@@ -259,8 +260,9 @@ static INLINE void options_read(void)
            "  L.*$: Free form log desription\r\n");
   nl = ' ' + 1;
   for(i = 0; i < sizeof(s); i++){
+    nl = getc();
     if( nl >= ' ' )
-      putch(nl = s[i] = getc());
+      putch(s[i] = nl);
     else
       s[i] = ' ';
   }
