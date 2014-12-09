@@ -19,7 +19,7 @@ SIZE=$(DIR_BIN)/avr-size
 
 #LIBS=-L$(DIR_TOOLS)/../lib -L$(DIR_TOOLS)/../lib/avr/lib
 CFLAGS= -std=c99 -DF_CPU=16000000UL -O -g -Wall -mmcu=$(MCU) -DBOOTSTART=$(BOOTSTART) -Wl,--section-start=.text=$(BOOTSTART) $(LIBS) -I$(DIR_INC)
-DUDEFLAGS=-v -v -F -p $(PARTNO) -cusbasp -F
+DUDEFLAGS=-v -v -F -p $(PARTNO) -cusbasp -F -C $(DUDECONF)
 
 # Get numbers only
 # Apply conversion factor (converts lsb to millivolts)
@@ -29,6 +29,8 @@ DUDEFLAGS=-v -v -F -p $(PARTNO) -cusbasp -F
 	awk 'BEGIN { sec = total = 0 }; { cur = $$1 * 0.0049 }; \
 	{ total = total + cur/(30*60) }; { print sec += 2, cur, total }' > $@
 
+showvars:
+	echo $(AVRDUDE) $(DUDEFLAGS)
 %.list: %.c
 	$(CC) -c $(CFLAGS) -E $< |less
 %.o:%.c
@@ -40,8 +42,10 @@ DUDEFLAGS=-v -v -F -p $(PARTNO) -cusbasp -F
 	$(OBJCOPY) -j .text -j .data -O ihex $< $@
 %.bin: %.hex
 	$(OBJCOPY) -I ihex -O binary $< $@
-%.program:%.hex
-	avrdude $(DUDEFLAGS) -U flash:w:$<
+%.program:%.hex %.eeprom.hex
+	$(AVRDUDE) $(DUDEFLAGS) -U flash:w:$*.hex -U eeprom:w:$*.eeprom.hex
+%.eeprom.hex:%.elf
+	$(OBJCOPY) -j .eeprom -O ihex $< $@
 
 # Copy fuses (if there is a .fuse section in the executable)
 %.fuses: %.elf
@@ -53,13 +57,10 @@ DUDEFLAGS=-v -v -F -p $(PARTNO) -cusbasp -F
 %.efuse: %.fuses
 	dd bs=1  count=1 skip=2 if=$< of=$@
 %.putfuses: %.lfuse %.hfuse %.efuse
-	avrdude $(DUDEFLAGS) -U hfuse:w:$*.hfuse:r -U lfuse:w:$*.lfuse:r -U efuse:w:$*.efuse:r
-%.partno: %.mcu
-	sed -e 's/atmega\([0123456789]*\)[a]/m\1/i' \
-	    -e 's/attiny\([0123456789]*\)[a]/t\1/i' <$< >$@
+	$(AVRDUDE) $(DUDEFLAGS) -U hfuse:w:$*.hfuse:r -U lfuse:w:$*.lfuse:r -U efuse:w:$*.efuse:r
 
 %.eeprom.dump:
-	avrdude $(DUDEFLAGS) -U eeprom:r:$@:r
+	$(AVRDUDE) $(DUDEFLAGS) -U eeprom:r:$@:r
 
 %.bitclean:
 	rm -f $*.o $*.elf $*.hex core
