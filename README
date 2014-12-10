@@ -3,31 +3,25 @@ What
 328log turns a cheap Arduino Pro Mini stamp board into a standalone low
 rate data logger, sampling from the ADC and writing to the device's
 own flash.  No external SD card is used.  The 30kB of available
-flash is enough for about 24,000 data points.  At a typical
-sample interval of 4 seconds, the device will store over a day's
+flash is enough for about 23,000 data points.  At a typical
+sample interval of 4 seconds, the device can store over a day's
 worth of data.
 
 Why
 ===
-Instead of simulating or guessing at, say, how much power a new
-project consumes, I find it's better to just log that parameter over
-the course of normal usage.  Often I will have some Arduino Pro Mini
-boards on hand, because they can be had for as little as $3 a piece.
-328log makes it trivial to collect the data.
-
-328log obviates the need for an SD card, which `will cost
-more than the board, and which will need level shifting.
-Sometimes you just don't need that kind of capacity and you
-don't want the extra complexity.
+Often I will have some Arduino Pro Mini boards on hand, because they
+can be had for as little as $3 a piece.  328log makes it trivial
+to collect data with few extra components, and the board can be
+reused for as a general purpose MCU.
 
 How
 ===
 328log is NOT an Arduino "sketch"; it replaces the Arduino
-bootloader that ships with the board.  To do this, you must use
+bootloader that ships with the board.  To do this, you need
 an in-circuit serial programmer (ISP), such as USBASP, or
 ArduinoISP.  If you have an Arduino IDE installed, you will
 already have all the software tools you need to programme the
-board with 328log.
+board with 328log (except make)
 
 To flash the programme image:
 

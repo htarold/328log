@@ -21,13 +21,10 @@ FUSES = {                             /* All are arduino defaults */
   .extended = 0x5,
 };
 
-struct options {
-  uint8_t nrchans;
-  uint8_t vref;
-  uint8_t nrseconds;
-};
-struct options opt;
-char EEMEM ee_config[88];
+static uint8_t sample_interval;
+static uint8_t nr_channels;
+static uint8_t admux[4];
+char EEMEM ee_config[80];
 
 #define DBG_LED_ON \
 { DDRB |= _BV(DDB5); PORTB |= _BV(PORTB5); }
@@ -38,7 +35,7 @@ static inline void timer_init(void)
 {
   TIMSK1 = _BV(OCIE1A);
 #if 1
-  OCR1A = 15625;                      /* every 1 second */
+  OCR1A = 15624;                      /* every 1 second */
 #else
   OCR1A = 3125;                       /* debug at speed */
 #endif
@@ -77,14 +74,18 @@ void putd(uint16_t d)
   }
 }
 
-static void puteestr(char * s, uint8_t len)  /* XXX May be very slow */
+static void puteestr(char * s)
 {
   uint8_t i;
-  for(i = 0; i < len; i++)
-    putch(eeprom_read_byte((uint8_t *)s+i));
+  for(i = 0; ; i++){
+    char ch;
+    ch = eeprom_read_byte((uint8_t *)s+i);
+    if( ! ch )break;
+    putch(ch);
+  }
 }
 #define PUTEESTR(lit) \
-{ static char str[] EEMEM = lit; puteestr(str, sizeof(str)-1); }
+{ static char str[] EEMEM = lit; puteestr(str); }
 static void putnl(void) { PUTEESTR("\r\n"); }
 
 static inline void usart_init(void)
@@ -111,7 +112,7 @@ static inline void page_sync(void)
   PUTEESTR("Flushed\r\n");
 }
 
-static void page_addword(uint8_t w)
+static void page_addword(uint16_t w)
 {
   if( page_address >= BOOTSTART )
     for( ; ; ){
@@ -126,7 +127,7 @@ static void page_addword(uint8_t w)
     page_sync();
 }
 
-static void page_add(uint16_t w)
+static inline void page_add(uint16_t w)
 {
   static uint32_t buffer;
   static uint8_t ndx;
@@ -144,10 +145,6 @@ static void page_add(uint16_t w)
 static inline uint16_t read_adc(uint8_t mux)
 {
   uint16_t lsb;
-#if 0
-  PRR &= ~_BV(PRADC);
-  ADCSRB = 0;
-#endif
   ADCSRA = _BV(ADEN)
          | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0);
   ADMUX = mux;
@@ -163,9 +160,7 @@ static void inline download(void)
   uint8_t i, field;
   uint16_t addr;
 
-  putch('!');
-  puteestr(ee_config, sizeof(ee_config));
-  putch('?');
+  puteestr(ee_config);
   putnl();
 
   addr = 0;
@@ -180,7 +175,7 @@ static void inline download(void)
       putd((buffer & 0x3ff00000)>>20);
       buffer <<= 10;
       field++;
-      if( field >= opt.nrchans ){ field = 0; putnl(); }
+      if( field >= nr_channels ){ field = 0; putnl(); }
       else PUTEESTR(" ");
     }
   }
@@ -204,8 +199,8 @@ static inline void read_record(void)
   uint8_t i;
   uint16_t adc;
 
-  for(i = 0; i < opt.nrchans; i++){
-    page_add(adc = read_adc(i | opt.vref));
+  for(i = 0; i < nr_channels; i++){
+    page_add(adc = read_adc(admux[i]));
 #if 0
     putstr("## Got value ");
     putd(adc);
@@ -221,51 +216,56 @@ static int8_t options_parse(void)
   uint8_t i;
 
   for(i = 0; i < sizeof(ee_config); i++)
-    config[i] = eeprom_read_byte(ee_config + i);
+    config[i] = eeprom_read_byte((uint8_t *)ee_config + i);
 
   s = config;
 
-  /* parse vref */
-  if( 'I' == *s )opt.vref = VREF_1V1;
-  else if( 'E' == *s )opt.vref = VREF_AVCC;
-  else return(-1);
-
-  /* parse nrchans */
-  s++;
-  if( *s < '1' || *s > '4' )return(-1);
-  opt.nrchans = *s - '0';
-
-  /* parse interval */
-  s++;
-  opt.nrseconds = 0;
-  while( *s >= '0' && *s <= '9' ){
-    opt.nrseconds *= 10;
-    opt.nrseconds += (*s - '0');
+  /* [IE]+[0123456789]+#.*$ */
+  nr_channels = 0;
+  for(i = 0; i < 4; i++){
+    if( *s == 'I' )
+      admux[i] = VREF_1V1;
+    else if( *s == 'E' )
+      admux[i] = VREF_AVCC;
+    else{
+      admux[i] = 0xff;
+      continue;
+    }
+    admux[i] |= i;
     s++;
+    nr_channels++;
   }
 
-  if( *s != 'L' )return(-1);
+  for(sample_interval = 0; *s >= '0' && *s <= '9'; s++){
+    sample_interval *= 10;
+    sample_interval += *s - '0';
+  }
+  if( *s != '#' )return(-1);
+  if( ! sample_interval )return(-1);
   return(0);
 }
+
 static inline void options_read(void)
 {
   char s[sizeof(ee_config)];
   uint8_t i;
   char nl;
 
-  PUTEESTR("Enter option string on one line: [IE][1234][0-9]+L.*$\r\n"
-           "  [IE]: I = internal 1.1V reference, E = AVCC\r\n"
-           "  [1234]: number of channels to log\r\n"
-           "  [0-9]+: sampling interval, seconds (max 255)\r\n"
-           "  L.*$: Free form log desription\r\n");
-  nl = ' ' + 1;
-  for(i = 0; i < sizeof(s); i++){
+  PUTEESTR("Enter option string on one line: [IE]{1,4}[0-9]+#.*$\r\n"
+           "  [IE]{1,4}: I = internal 1.1V reference or E = VCC\r\n"
+           "  Repeat for up to 4 channels to log\r\n"
+           "  [0-9]+: sampling interval, seconds (1 to 255)\r\n"
+           "  #.*$: Free form log desription\r\n");
+
+  for(i = 0; i < sizeof(s)-1; i++){
     nl = getc();
-    if( nl >= ' ' )
+    if( nl > '\r' )
       putch(s[i] = nl);
     else
-      s[i] = ' ';
+      break;
   }
+  s[i] = '\0';
+  putnl();
   eeprom_write_block(s, ee_config, sizeof(ee_config));
 }
 
@@ -283,6 +283,7 @@ int main(void)
 
   while( have_data() ){
     char ch;
+    (void)options_parse(); /* XXX */
     PUTEESTR("[D]ownload/[e]rase? ");
     ch = getc();
     if( 'D' == ch )download();
@@ -308,7 +309,7 @@ begin_logging:
   set_sleep_mode(SLEEP_MODE_IDLE);
 
   for(timer_secs = 0; ; ){
-    while( timer_secs < opt.nrseconds )
+    while( timer_secs < sample_interval )
       sleep_mode();
     timer_secs = 0;
     read_record();
