@@ -1,3 +1,8 @@
+/*
+  Turn an Arduino Pro Mini into a low-rate data logger.
+  GPLv3.
+  Harold Tay.
+ */
 #include <stdint.h>
 #include <avr/interrupt.h>
 #include <avr/io.h>
@@ -34,11 +39,7 @@ volatile uint8_t timer_secs; ISR(TIMER1_COMPA_vect) { timer_secs++; }
 static inline void timer_init(void)
 {
   TIMSK1 = _BV(OCIE1A);
-#if 1
   OCR1A = 15624;                      /* every 1 second */
-#else
-  OCR1A = 3125;                       /* debug at speed */
-#endif
   /* TCCR1A = 0; */
   TCCR1B = _BV(WGM12)                 /* CTC mode 4 */
          | _BV(CS12) | _BV(CS10);     /* /1024 = 15625Hz */
@@ -160,6 +161,7 @@ static void inline download(void)
   uint8_t i, field;
   uint16_t addr;
 
+  putnl();
   puteestr(ee_config);
   putnl();
 
@@ -199,14 +201,8 @@ static inline void read_record(void)
   uint8_t i;
   uint16_t adc;
 
-  for(i = 0; i < nr_channels; i++){
+  for(i = 0; i < nr_channels; i++)
     page_add(adc = read_adc(admux[i]));
-#if 0
-    putstr("## Got value ");
-    putd(adc);
-    putnl();
-#endif
-  }
 }
 
 static int8_t options_parse(void)
@@ -220,12 +216,12 @@ static int8_t options_parse(void)
 
   s = config;
 
-  /* [IE]+[0123456789]+#.*$ */
+  /* [vV]+[0123456789]+#.*$ */
   nr_channels = 0;
   for(i = 0; i < 4; i++){
-    if( *s == 'I' )
+    if( *s == 'v' )
       admux[i] = VREF_1V1;
-    else if( *s == 'E' )
+    else if( *s == 'V' )
       admux[i] = VREF_AVCC;
     else{
       admux[i] = 0xff;
@@ -251,11 +247,15 @@ static inline void options_read(void)
   uint8_t i;
   char nl;
 
-  PUTEESTR("Enter option string on one line: [IE]{1,4}[0-9]+#.*$\r\n"
-           "  [IE]{1,4}: I = internal 1.1V reference or E = VCC\r\n"
+  PUTEESTR("\r\nEnter options on one line: [vV]{1,4}[0-9]+#.*$\r\n"
+           "  [vV]{1,4}: v = internal 1.1V reference or V = VCC\r\n"
            "  Repeat for up to 4 channels to log\r\n"
            "  [0-9]+: sampling interval, seconds (1 to 255)\r\n"
            "  #.*$: Free form log desription\r\n");
+  PUTEESTR("  e.g. \"vV3# Trial #42<enter>\" means log ADC0 (1.1V reference)\r\n"
+	   "and ADC1 (VCC as reference), every 3 seconds.\r\n"
+	   "Logging 1 channel every 4s, memory will last 1 day.\r\n"
+	   "Logging 4 channels every 1s, memory will last 1.5 hours.\r\n");
 
   for(i = 0; i < sizeof(s)-1; i++){
     nl = getc();
@@ -280,22 +280,24 @@ int main(void)
   MCUCR = _BV(IVSEL);
 
   usart_init();
-
-  while( have_data() ){
-    char ch;
-    (void)options_parse(); /* XXX */
-    PUTEESTR("[D]ownload/[e]rase? ");
-    ch = getc();
-    if( 'D' == ch )download();
-    else if( 'e' == ch )erase();
-  }
-
   timer_init();
   sei();
 
   for( ; ; ){
-    if( 0 == options_parse() ){
-      /* wait 4 seconds to begin logging */
+    int8_t options_are_bad;
+
+    options_are_bad = options_parse();
+    if( have_data() ){                /* assume options ok */
+      char ch;
+      PUTEESTR("[D]ownload/[e]rase? ");
+      ch = getc();
+      if( 'D' == ch )download();
+      else if( 'e' == ch )erase();
+      continue;
+    }
+    
+    if( ! options_are_bad ){
+      PUTEESTR("Start logging in 4 seconds unless key pressed...");
       for(timer_secs = 0; NO_CHAR_RECEIVED; )
         if( timer_secs >= 4 )goto begin_logging;
       (void)getc();
@@ -305,7 +307,7 @@ int main(void)
   }
 
 begin_logging:
-  PUTEESTR("Logging start.\r\n");
+  PUTEESTR("\r\nLogging started.\r\n");
   set_sleep_mode(SLEEP_MODE_IDLE);
 
   for(timer_secs = 0; ; ){

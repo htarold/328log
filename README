@@ -21,49 +21,45 @@ bootloader that ships with the board.  To do this, you need
 an in-circuit serial programmer (ISP), such as USBASP, or
 ArduinoISP.  If you have an Arduino IDE installed, you will
 already have all the software tools you need to programme the
-board with 328log (except make)
+board with 328log.
 
 To flash the programme image:
+path/to/avrdude -v -F -p m328p -c usbasp -C path/to/avrdude.conf \
+  -U flash:w:328log.hex -U eeprom:w:328log.eeprom.hex
+where path/to/avrdude and path/to/avrdude.conf are somewhere in the
+Arduino directory under hardware/tools/.  This assumes you are
+using USBASP as the programmer.
 
-How to use
-==========
-The device will begin logging immediately if it can do so safely
-and if not interrupted (by keyboard).  Otherwise it will present
-the menu for your attention, which will be the case initially.
+You will not need to change the fuse bits; they are the same as
+for the Arduino.
 
-Connect up the serial connection (typically you would use a
-USB-TTL serial converter) and set parameters to 19200, 8N1.
-The board will respond with a menu.  You can perform the
-following:
-- Select internal 1.1V voltage reference or Vcc;
-- Select number of channels (up to 4);
-- Select sample interval (0.5s to 10s)
-- Enter a note
-- Download data
-- Erase flash
+Quick start
+===========
+After flashing the image (using the command above, or by way of
+the Makefile), connect the device with a serial cable (TTL level
+in the case of the Pro Mini), 19200 8N1.
 
-If 1 channel is selected, then it is ADC0 (pin A0 on the board);
-if 2 channels, then the second is ADC1 (A1); etc.
+Connect some voltage source to pins A0-A3 if desired.  You can
+just tie some to ground, and others to Vcc.  Or leave them
+floating to record some random values.
 
-Choosing the 1.1V reference is useful if you need slightly
-better resolution, or if you are powering the board from an
-external, noisy, 5V supply such as USB.
+Power on the device if not already on.
 
-You should enable screen logging before choosing Download, which
-copies the logged data to the terminal.
+Hit the reset button on the device if you don't see a usage message.
 
-Erase erases the logged data and the accompanying note.
+Type "VVVV1# Logging 4 channels every 1 second" and hit enter.
 
-The note can contain the date, time, location, purpose, setup,
-your name, etc. of the data to be logged.  Max 127 characters long.
+Wait 4 seconds until you see "Logging started".
 
-Power off the board after configuration.  The device will begin
-logging when next powered up or reset.  You can detach the serial
-connection (typically) or leave it attached to view the logging
-process.
+Wait another 1.5 minutes until you see "Flushed".
 
-The device buffers the data collected before it is written to
-flash, so when you power it off, you may lose up to one full buffer's
-worth of data (about a hundred data points).  This is rarely an issue,
-and you can avoid it by always letting it log to full flash
-capacity.
+Hit the reset button.
+
+Choose D (upper case) for download.
+
+Choose e (lower case), then y to erase the data.
+
+Wait 4 seconds for device to start logging again, or press a key
+to re-enter a new options string, or power off.
+
+If you find this useful, drop me a note.

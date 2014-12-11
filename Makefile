@@ -63,7 +63,7 @@ showvars:
 	$(AVRDUDE) $(DUDEFLAGS) -U eeprom:r:$@:r
 
 %.bitclean:
-	rm -f $*.o $*.elf $*.hex core
+	rm -f $*.o $*.elf $*.hex $*.*.hex $*.*.dump core
 
 .PRECIOUS:*.bitclean *.boardclean
 %.clean:%.bitclean %.boardclean
