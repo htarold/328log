@@ -30,14 +30,16 @@ where path/to/avrdude and path/to/avrdude.conf are somewhere in the
 Arduino directory under hardware/tools/.  This assumes you are
 using USBASP as the programmer.
 
+Alternatively you can type "make 328log.program" if you have
+development tools installed.
+
 You will not need to change the fuse bits; they are the same as
 for the Arduino.
 
 Quick start
 ===========
-After flashing the image (using the command above, or by way of
-the Makefile), connect the device with a serial cable (TTL level
-in the case of the Pro Mini), 19200 8N1.
+After flashing the image (see above), connect to the device with a
+serial cable (TTL level in the case of the Pro Mini), 19200 8N1.
 
 Connect some voltage source to pins A0-A3 if desired.  You can
 just tie some to ground, and others to Vcc.  Or leave them
@@ -53,13 +55,28 @@ Wait 4 seconds until you see "Logging started".
 
 Wait another 1.5 minutes until you see "Flushed".
 
-Hit the reset button.
+Reset or power cycle the device.
 
-Choose D (upper case) for download.
+Choose D (upper case) for download.  View your data!
 
-Choose e (lower case), then y to erase the data.
+Choose e (lower case), then confirm with y to erase the data.
 
 Wait 4 seconds for device to start logging again, or press a key
 to re-enter a new options string, or power off.
 
+To use operationally, after erasing any data and setting the options
+string, power off the device before the next "Flushed" message.
+When it is next powered on, it will begin logging (after giving
+you a 4-second opportunity to change the options).  The terminal
+does not need to be attached.
+
+Logging stops when the device is powered off or reset.
+
 If you find this useful, drop me a note.
+
+Caveats
+=======
+Try not to mix voltage references; either use all 'V' (Vcc as
+ref) or 'v' (internal 1.1V ref).  When the reference is changed,
+the old voltage has to bleed off the cap at the AREF pin, and
+how long this takes depends on the cap size.
