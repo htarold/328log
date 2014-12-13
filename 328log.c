@@ -120,8 +120,6 @@ static void page_addword(uint16_t w)
       sleep_mode();
       PUTEESTR("Out of memory\r\n");
     }
-  if( 0 == page_offset )
-    boot_page_erase_safe(page_address);
   boot_page_fill_safe((uint32_t)page_address + page_offset, w);
   page_offset += 2;
   if( page_offset >= SPM_PAGESIZE )
@@ -186,9 +184,11 @@ static void inline download(void)
 
 static inline void erase(void)
 {
+  uint16_t addr;
   PUTEESTR("Really erase? ");
   if( 'y' != getc() )return;
-  boot_page_erase_safe(0);
+  for(addr = 0; addr < BOOTSTART; addr += SPM_PAGESIZE)
+    boot_page_erase_safe(addr);
   PUTEESTR("Erased\r\n");
 }
 
@@ -271,7 +271,7 @@ static inline void options_read(void)
 
 static inline int8_t have_data(void)
 {
-  return(pgm_read_word_near(0) != 0xffff);
+  return(pgm_read_dword_near(0) != 0xffffffff);
 }
 
 int main(void)
