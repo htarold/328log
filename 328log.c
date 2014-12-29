@@ -31,8 +31,9 @@ static uint8_t nr_channels;
 static uint8_t admux[4];
 char EEMEM ee_config[80];
 
-#define DBG_LED_ON \
-{ DDRB |= _BV(DDB5); PORTB |= _BV(PORTB5); }
+#define led_init() do { DDRB |= _BV(DDB5); }while( 0 )
+#define led_on() do{ PORTB |= _BV(PORTB5); }while( 0 )
+#define led_off() do{ PORTB &= ~_BV(PORTB5); }while( 0 )
 
 volatile uint8_t timer_secs; ISR(TIMER1_COMPA_vect) { timer_secs++; }
 
@@ -211,8 +212,11 @@ static int8_t options_parse(void)
   char * s;
   uint8_t i;
 
-  for(i = 0; i < sizeof(ee_config); i++)
+  for(i = 0; i < sizeof(ee_config); i++){
     config[i] = eeprom_read_byte((uint8_t *)ee_config + i);
+    if( config[i] > 0 )putch(config[i]);
+  }
+  putnl();
 
   s = config;
 
@@ -223,10 +227,8 @@ static int8_t options_parse(void)
       admux[i] = VREF_1V1;
     else if( *s == 'V' )
       admux[i] = VREF_AVCC;
-    else{
-      admux[i] = 0xff;
-      continue;
-    }
+    else
+      break;
     admux[i] |= i;
     s++;
     nr_channels++;
@@ -281,11 +283,14 @@ int main(void)
 
   usart_init();
   timer_init();
+  led_init();
   sei();
+
 
   for( ; ; ){
     int8_t options_are_bad;
 
+    led_on();
     options_are_bad = options_parse();
     if( have_data() ){                /* assume options ok */
       char ch;
@@ -298,6 +303,7 @@ int main(void)
     
     if( ! options_are_bad ){
       PUTEESTR("Start logging in 4 seconds unless key pressed...");
+      led_off();
       for(timer_secs = 0; NO_CHAR_RECEIVED; )
         if( timer_secs >= 4 )goto begin_logging;
       (void)getc();
@@ -307,8 +313,10 @@ int main(void)
   }
 
 begin_logging:
+  led_on();
   PUTEESTR("\r\nLogging started.\r\n");
   set_sleep_mode(SLEEP_MODE_IDLE);
+  led_off();
 
   for(timer_secs = 0; ; ){
     while( timer_secs < sample_interval )
