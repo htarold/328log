@@ -245,9 +245,9 @@ static int8_t options_parse(void)
 
 static inline void options_read(void)
 {
-  char s[sizeof(ee_config)];
+  char config[sizeof(ee_config)];
   uint8_t i;
-  char nl;
+  char ch;
 
   PUTEESTR("\r\nEnter options on one line: [vV]{1,4}[0-9]+#.*$\r\n"
            "  [vV]{1,4}: v = internal 1.1V reference or V = VCC\r\n"
@@ -259,16 +259,16 @@ static inline void options_read(void)
 	   "Logging 1 channel every 4s, memory will last 1 day.\r\n"
 	   "Logging 4 channels every 1s, memory will last 1.5 hours.\r\n");
 
-  for(i = 0; i < sizeof(s)-1; i++){
-    nl = getc();
-    if( nl > '\r' )
-      putch(s[i] = nl);
+  for(i = 0; i < sizeof(config)-1; i++){
+    ch = getc();
+    if( ch > '\r' )
+      putch(config[i] = ch);
     else
       break;
   }
-  s[i] = '\0';
+  config[i] = '\0';
   putnl();
-  eeprom_write_block(s, ee_config, sizeof(ee_config));
+  eeprom_write_block(config, ee_config, sizeof(ee_config));
 }
 
 static inline int8_t have_data(void)
@@ -314,7 +314,7 @@ int main(void)
 
 begin_logging:
   led_on();
-  PUTEESTR("\r\nLogging started.\r\n");
+  PUTEESTR("\r\nLogging started (remove serial cable NOW).\r\n");
   set_sleep_mode(SLEEP_MODE_IDLE);
   led_off();
 

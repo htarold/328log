@@ -80,3 +80,7 @@ Try not to mix voltage references; either use all 'V' (Vcc as
 ref) or 'v' (internal 1.1V ref).  When the reference is changed,
 the old voltage has to bleed off the cap at the AREF pin, and
 how long this takes depends on the cap size.
+
+Do not connect or disconnect the serial cable during the
+critical 5 seconds after reset or power up, when it is looking
+for serial input.  This can lead to configuration corruption.
